@@ -1,0 +1,55 @@
+{
+  "rules": [
+    {
+      "id": "example-replace-response",
+      "enabled": false,
+      "match": {
+        "direction": "s2c",
+        "target_port": 9000,
+        "hex_prefix": "01"
+      },
+      "action": {
+        "type": "replace",
+        "find_hex": "0d0a",
+        "replace_hex": "0000"
+      }
+    },
+    {
+      "id": "example-synthesize-reply",
+      "enabled": false,
+      "match": {
+        "direction": "c2s",
+        "hex_contains": "deadbeef"
+      },
+      "action": {
+        "type": "respond",
+        "response_hex": "0102030405060708",
+        "drop_original": true
+      }
+    },
+    {
+      "id": "example-drop-packet",
+      "enabled": false,
+      "match": {
+        "direction": "c2s",
+        "target_host": "192.168.1.14",
+        "target_port": 7001
+      },
+      "action": {
+        "type": "drop"
+      }
+    },
+    {
+      "id": "example-append-tail",
+      "enabled": false,
+      "match": {
+        "direction": "s2c",
+        "hex_regex": "0b"
+      },
+      "action": {
+        "type": "append",
+        "hex": "00"
+      }
+    }
+  ]
+}
