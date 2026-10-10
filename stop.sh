@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# capture_tool/stop.sh —— 停止 SOCKS5 代理抓包核心
+# stop.sh —— 停止 SOCKS5 代理抓包核心
 #
 # 先 SIGTERM 优雅退出，超时再 SIGKILL；只结束确认是本工具的进程。
 # 用法
-#   ./capture_tool/stop.sh
+#   ./stop.sh
 # 可覆盖的环境变量
 #   CONTROL(127.0.0.1:1090) PID_FILE WAIT_SECONDS(5)
 set -uo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # capture_tool/
-ROOT="$(cd "$HERE/.." && pwd)"                          # 仓库根
-cd "$ROOT"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # 仓库根（脚本与 server.py 同层）
+cd "$HERE"
 
 CONTROL="${CONTROL:-127.0.0.1:1090}"
 PID_FILE="${PID_FILE:-$HERE/run/server.pid}"
@@ -30,7 +29,7 @@ except Exception:
 PY
 }
 
-is_ours() {    # $1=pid：确认是「python 解释器在跑 capture_tool/server.py」
+is_ours() {    # $1=pid：确认是「python 解释器在跑 server.py」
     # 只看命令行里出现过这个路径会被误伤（别的 shell/编辑器命令行里提到也会命中）；
     # 所以先看 /proc/<pid>/exe 的可执行文件是不是 python，再看命令行里的脚本路径。
     [ -r "/proc/$1/cmdline" ] || return 1
@@ -41,8 +40,8 @@ is_ours() {    # $1=pid：确认是「python 解释器在跑 capture_tool/server
         *) return 1 ;;
     esac
     # 按 argv 结构判断，而不是“命令行文本里恰好包含这个路径”：
-    #   python3 [-flags] capture_tool/server.py ...   -> 是我们
-    #   python3 -c "...capture_tool/server.py..."     -> 不是（内联代码）
+    #   python3 [-flags] server.py ...              -> 是我们
+    #   python3 -c "...server.py..."                   -> 不是（内联代码）
     local -a argv=()
     local tok
     while IFS= read -r -d '' tok; do argv+=("$tok"); done <"/proc/$1/cmdline"
@@ -52,7 +51,7 @@ is_ours() {    # $1=pid：确认是「python 解释器在跑 capture_tool/server
         case "$tok" in
             -c | -m | --command | --module) return 1 ;;
             -*) continue ;;
-            *capture_tool/server.py) return 0 ;;
+            */server.py) return 0 ;;
             *) return 1 ;;
         esac
     done
@@ -67,7 +66,7 @@ if [ -f "$PID_FILE" ]; then
         if is_ours "$P"; then
             TARGETS="$P"
         else
-            echo "错误: pid $P 不是 capture_tool/server.py（pid 可能被复用），拒绝结束。" >&2
+            echo "错误: pid $P 不是 server.py（pid 可能被复用），拒绝结束。" >&2
             echo "如确认要清理，请手动删除过期 pid 文件: $PID_FILE" >&2
             exit 1
         fi
@@ -75,11 +74,11 @@ if [ -f "$PID_FILE" ]; then
 fi
 if [ -z "$TARGETS" ]; then
     # 兜底：按进程名找，再用 is_ours 过一遍，避免误伤只是命令行里提到该路径的进程
-    for p in $(pgrep -f "[c]apture_tool/server\.py" 2>/dev/null || true); do
+    for p in $(pgrep -f "[p]ython3? .*[/ ]server\.py" 2>/dev/null || true); do
         if is_ours "$p"; then
             TARGETS="$TARGETS $p"
         else
-            echo "跳过 pid $p：命令行不像是「python 跑 capture_tool/server.py」" >&2
+            echo "跳过 pid $p：命令行不像是「python 跑 server.py」" >&2
         fi
     done
     TARGETS="$(echo $TARGETS)"

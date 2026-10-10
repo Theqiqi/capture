@@ -24,8 +24,10 @@ import os
 import socket
 import sys
 
-# 保证能 Import capture_tool/server.py（本文件和 server.py 同目录）
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) or ".")
+# 保证能 Import capture_tool/server.py（本文件在 test/ 下，核心 server.py 在上一级）
+# 核心 server.py 在上一级；测试从任意工作目录运行都要能 import 到它
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
 
 from server import LogStore, hexdump, run_socks5
 

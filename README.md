@@ -1,32 +1,45 @@
 # SOCKS5 代理抓包核心 (常驻)
 
-`capture_tool/server.py` 是一个 SOCKS5 代理服务器，供 Proxifier 等客户端连接。
+`server.py` 是一个 SOCKS5 代理服务器，供 Proxifier 等客户端连接。
 它把目标进程的流量引过来后：**转发 + 记录原始字节**，并可**在线改包 / 丢弃 / 构造应答 / 注入包**。
 
 核心进程常驻；所有“改包/发包”的规则和命令通过**控制通道**下发，改规则、注入包
 **都不需要重启核心，也不需要重启客户端**。
 
+## 目录结构
+
+```
+server.py            核心：SOCKS5 代理 + 抓包记录 + 规则引擎
+ctl.py               控制客户端，通过控制通道下发命令
+analyze.py           按流切帧的分析工具
+rules.example.json   规则示例
+start.sh / stop.sh   启停脚本
+test/                自测脚本（test_tcp / test_udp / test_udp_relay）
+docs/idea.md         设计文档
+log/  run/           运行时产物（抓包记录与 pid 文件，已 gitignore）
+```
+
 自测（不依赖外部客户端）：
 
-- `python3 capture_tool/test_tcp.py` —— PASS = TCP 代理转发 + 记录可用。
-- `python3 capture_tool/test_udp.py` —— PASS = SOCKS5 UDP ASSOCIATE 转发 + 记录 + 规则构造应答可用。
-- `python3 capture_tool/test_udp_relay.py` —— PASS = 直连 UDP 中继（`--udp-relay`）转发 + 记录 + 规则 + inject 可用。
+- `python3 test/test_tcp.py` —— PASS = TCP 代理转发 + 记录可用。
+- `python3 test/test_udp.py` —— PASS = SOCKS5 UDP ASSOCIATE 转发 + 记录 + 规则构造应答可用。
+- `python3 test/test_udp_relay.py` —— PASS = 直连 UDP 中继（`--udp-relay`）转发 + 记录 + 规则 + inject 可用。
 
 ## 启动 / 停止（推荐用脚本）
 
 ```bash
-./capture_tool/start.sh               # 默认：后台启动（nohup），SSH/终端断开后继续运行
-./capture_tool/start.sh --foreground  # 前台启动：日志同时打到终端和 log/server.log，Ctrl-C 停止
-./capture_tool/start.sh --help        # 用法
-./capture_tool/stop.sh                # 停止：先 SIGTERM，超时再 SIGKILL；按 /proc/<pid>/exe + argv 双重确认，pid 被复用会拒绝结束
+././start.sh               # 默认：后台启动（nohup），SSH/终端断开后继续运行
+././start.sh --foreground  # 前台启动：日志同时打到终端和 log/server.log，Ctrl-C 停止
+././start.sh --help        # 用法
+././stop.sh                # 停止：先 SIGTERM，超时再 SIGKILL；按 /proc/<pid>/exe + argv 双重确认，pid 被复用会拒绝结束
 
 # 覆盖默认值（环境变量）
-LISTEN=127.0.0.1:1080 TCP_LOG=/tmp/tcp.log ./capture_tool/start.sh
+LISTEN=127.0.0.1:1080 TCP_LOG=/tmp/tcp.log ././start.sh
 # 追加参数给 server.py
-./capture_tool/start.sh --rules capture_tool/rules.example.json
+././start.sh --rules rules.example.json
 
 # 直连 UDP 中继：客户端把服务器地址直接指向中继端口，不经过 Windows 代理客户端
-UDP_RELAY="9001:127.0.0.1:9000" ./capture_tool/start.sh
+UDP_RELAY="9001:127.0.0.1:9000" ././start.sh
 ```
 
 ### 该选哪种模式（SSH 断开行为已实测）
@@ -34,8 +47,8 @@ UDP_RELAY="9001:127.0.0.1:9000" ./capture_tool/start.sh
 | | 后台（默认） | 前台 `--foreground` / `-f` |
 |---|---|---|
 | 终端 / SSH 断开 | **继续运行**（nohup 忽略 SIGHUP） | **随会话结束**（SIGHUP） |
-| 看实时日志 | `tail -f capture_tool/log/server.log` | 直接打在终端，同时也进 `server.log` |
-| 停止 | `./capture_tool/stop.sh` | `Ctrl-C` 或 `./capture_tool/stop.sh` |
+| 看实时日志 | `tail -f log/server.log` | 直接打在终端，同时也进 `server.log` |
+| 停止 | `././stop.sh` | `Ctrl-C` 或 `././stop.sh` |
 | 适合 | 常驻抓包（默认就该用这个） | 调试启动/规则，或交给 tmux、systemd 托管 |
 
 - 两类模式都写 pid 文件、都做「已在运行就不重复启动」检查；`Ctrl-C` 会转发 SIGTERM 并清理 pid 文件。
@@ -45,12 +58,12 @@ UDP_RELAY="9001:127.0.0.1:9000" ./capture_tool/start.sh
 可覆盖的环境变量：`LISTEN`(`0.0.0.0:1080`) `CONTROL`(`127.0.0.1:1090`)
 `UDP_START_PORT`(`1081`) `UDP_RELAY`(空；格式 `PORT:TARGET_HOST:TARGET_PORT`，多个用空格分隔)
 `LOG_DIR` `TCP_LOG` `UDP_LOG` `SERVER_LOG` `PID_FILE`。
-默认落点：记录与进程日志在 `capture_tool/log/`，pid 在 `capture_tool/run/server.pid`。
+默认落点：记录与进程日志在 `log/`，pid 在 `run/server.pid`。
 
 ### 手工启动（等价于脚本做的事）
 
 ```bash
-python3 -u capture_tool/server.py \
+python3 -u server.py \
   --listen 0.0.0.0:1080 \
   --control 127.0.0.1:1090 \
   --tcp-log ./log/tcp.log \
@@ -90,7 +103,7 @@ Proxifier 端：类型 SOCKS5，地址填代理机 IP，端口 1080，无需认�
 
 ## 控制通道
 
-一行一个 JSON 命令，一行一个 JSON 响应。用 `tool/ctl.py` 或任意 TCP 客户端发。
+一行一个 JSON 命令，一行一个 JSON 响应。用 `ctl.py` 或任意 TCP 客户端发。
 
 | 命令 | 作用 |
 |---|---|
@@ -164,28 +177,28 @@ Proxifier 端：类型 SOCKS5，地址填代理机 IP，端口 1080，无需认�
 
 ```bash
 # 0) 一次实验一个日志文件（可选，但最干净）
-TCP_LOG=/tmp/exp1-tcp.log UDP_LOG=/tmp/exp1-udp.log ./capture_tool/start.sh
+TCP_LOG=/tmp/exp1-tcp.log UDP_LOG=/tmp/exp1-udp.log ././start.sh
 
 # 1) 先做一次基线动作
-python3 capture_tool/ctl.py mark --name exp1-baseline --note "1+1 正常路径"
+python3 ctl.py mark --name exp1-baseline --note "1+1 正常路径"
 #   ... 触发客户端动作 ...
 
 # 2) 打一个新边界，再做要研究的动作
-python3 capture_tool/ctl.py mark --name exp1-target --note "7/0 除零分支"
+python3 ctl.py mark --name exp1-target --note "7/0 除零分支"
 #   ... 触发要研究的动作 ...
 
 # 3) 只看边界之后的流量（不动任何历史记录）
-python3 capture_tool/ctl.py marks                                     # 看所有边界
-python3 capture_tool/ctl.py records --since-mark exp1-target --limit 0
-python3 capture_tool/analyze.py --since-mark exp1-target              # 按流切帧
-python3 capture_tool/ctl.py records --since-id 42                     # 也行：直接用 id
+python3 ctl.py marks                                     # 看所有边界
+python3 ctl.py records --since-mark exp1-target --limit 0
+python3 analyze.py --since-mark exp1-target              # 按流切帧
+python3 ctl.py records --since-id 42                     # 也行：直接用 id
 
 # 3.5) 取“某一段动作”：A 边界到 B 边界之间（一次动作 = 一段）
-python3 capture_tool/ctl.py records --since-mark exp1-baseline --until-mark exp1-target --limit 0
-python3 capture_tool/analyze.py --since-mark exp1-baseline --until-mark exp1-target
+python3 ctl.py records --since-mark exp1-baseline --until-mark exp1-target --limit 0
+python3 analyze.py --since-mark exp1-baseline --until-mark exp1-target
 
 # 4) 边界之前的基线仍在 → 可做 A/B 对照
-python3 capture_tool/ctl.py records --target-port 9000 --limit 0
+python3 ctl.py records --target-port 9000 --limit 0
 ```
 
 要点：
@@ -210,63 +223,63 @@ python3 capture_tool/ctl.py records --target-port 9000 --limit 0
 | `pending` | 等待“服务器静默则替应答”的请求 | 自动（服务器回包或超时即清） |
 | `records` | 抓包历史 | 自动 |
 
-任何时候 `python3 capture_tool/ctl.py state` 就能看到全部真相。
+任何时候 `python3 ctl.py state` 就能看到全部真相。
 
 ## CLI 用法
 
 ```bash
 # 实验边界：分段记录，不用清空日志
-python3 capture_tool/ctl.py mark --name exp1 --note "改客户端输入前的基线"
-python3 capture_tool/ctl.py marks
-python3 capture_tool/ctl.py records --since-mark exp1 --limit 0
-python3 capture_tool/ctl.py records --since-mark exp1 --until-mark exp2 --limit 0   # 取 exp1..exp2 这一段
+python3 ctl.py mark --name exp1 --note "改客户端输入前的基线"
+python3 ctl.py marks
+python3 ctl.py records --since-mark exp1 --limit 0
+python3 ctl.py records --since-mark exp1 --until-mark exp2 --limit 0   # 取 exp1..exp2 这一段
 
 # 查看
-python3 capture_tool/ctl.py status
-python3 capture_tool/ctl.py rules
-python3 capture_tool/ctl.py sessions
-python3 capture_tool/ctl.py records --which tcp --limit 20 --direction s2c
+python3 ctl.py status
+python3 ctl.py rules
+python3 ctl.py sessions
+python3 ctl.py records --which tcp --limit 20 --direction s2c
 
 # 改响应：把 s2c 里的 "TCP-ECHO:" 换成 "MOD:"
-python3 capture_tool/ctl.py set-rule --rule '{"id":"r-mod","match":{"direction":"s2c","hex_contains":"5443502d4543484f3a"},"action":{"type":"replace","find_hex":"5443502d4543484f3a","replace_hex":"4d4f443a"}}'
+python3 ctl.py set-rule --rule '{"id":"r-mod","match":{"direction":"s2c","hex_contains":"5443502d4543484f3a"},"action":{"type":"replace","find_hex":"5443502d4543484f3a","replace_hex":"4d4f443a"}}'
 
 # 构造应答：客户端请求含 "force" 时直接回 deadbeef，不经后端
-python3 capture_tool/ctl.py set-rule --rule '{"id":"r-force","match":{"direction":"c2s","hex_contains":"666f726365"},"action":{"type":"respond","response_hex":"deadbeef","drop_original":true}}'
+python3 ctl.py set-rule --rule '{"id":"r-force","match":{"direction":"c2s","hex_contains":"666f726365"},"action":{"type":"respond","response_hex":"deadbeef","drop_original":true}}'
 
-python3 capture_tool/ctl.py state
-python3 capture_tool/ctl.py pending
-python3 capture_tool/ctl.py del-rule r-mod
-python3 capture_tool/ctl.py clear-rules
-python3 capture_tool/ctl.py save capture_tool/behaviors.json
-python3 capture_tool/ctl.py load capture_tool/behaviors.json
+python3 ctl.py state
+python3 ctl.py pending
+python3 ctl.py del-rule r-mod
+python3 ctl.py clear-rules
+python3 ctl.py save behaviors.json
+python3 ctl.py load behaviors.json
 
 # 封包重放：把记录里的 s2c 包原样重放给客户端
-python3 capture_tool/ctl.py replay --sid 3 --ids 56              # 重放某条记录
-python3 capture_tool/ctl.py replay --sid 3 --ids 43,44,53 --interval-ms 50 --repeat 2
-python3 capture_tool/ctl.py replay --sid 3 --direction s2c --since 50 --limit 3   # 最近3条s2c
-python3 capture_tool/ctl.py replay --sid 3 --ids 52 --to server  # 重放给服务器(冒充客户端)
+python3 ctl.py replay --sid 3 --ids 56              # 重放某条记录
+python3 ctl.py replay --sid 3 --ids 43,44,53 --interval-ms 50 --repeat 2
+python3 ctl.py replay --sid 3 --direction s2c --since 50 --limit 3   # 最近3条s2c
+python3 ctl.py replay --sid 3 --ids 52 --to server  # 重放给服务器(冒充客户端)
 
 # 替模拟服务器应答：服务器静默 500ms 就替它回 auth 应答
-python3 capture_tool/ctl.py set-rule --rule '{"id":"mock-auth","match":{"direction":"c2s","flow":{"target_port":9000},"hex_prefix":"0001"},"action":{"type":"mock","response_hex":"0001000700000000","timeout_ms":500,"drop_original":false}}'
+python3 ctl.py set-rule --rule '{"id":"mock-auth","match":{"direction":"c2s","flow":{"target_port":9000},"hex_prefix":"0001"},"action":{"type":"mock","response_hex":"0001000700000000","timeout_ms":500,"drop_original":false}}'
 
 # 改服务器响应：把 s2c 偏移 11 处的 4 字节改成 00000000
-python3 capture_tool/ctl.py set-rule --rule '{"id":"patch-hdr","match":{"direction":"s2c","flow":{"target_port":34055}},"action":{"type":"patch","offset":11,"hex":"00000000"}}'
+python3 ctl.py set-rule --rule '{"id":"patch-hdr","match":{"direction":"s2c","flow":{"target_port":34055}},"action":{"type":"patch","offset":11,"hex":"00000000"}}'
 
 # 注入 / 重发
-python3 capture_tool/ctl.py inject-tcp --sid 1 --data-hex 494e4a454354                  # 冒充服务器给客户端
-python3 capture_tool/ctl.py inject-tcp --sid 1 --to server --data-hex 494e4a454354      # 冒充客户端给服务器
-python3 capture_tool/ctl.py inject-udp --data-hex cafebabe
+python3 ctl.py inject-tcp --sid 1 --data-hex 494e4a454354                  # 冒充服务器给客户端
+python3 ctl.py inject-tcp --sid 1 --to server --data-hex 494e4a454354      # 冒充客户端给服务器
+python3 ctl.py inject-udp --data-hex cafebabe
 
 # 多条 + 多次发包
-python3 capture_tool/ctl.py inject-tcp --sid 1 --to server --packets "50494e47,504f4e47" --repeat 3 --interval-ms 50
-python3 capture_tool/ctl.py inject-tcp --sid 1 --data-hex a1b2 --packets "c3d4,e5f6" --repeat 3
-python3 capture_tool/ctl.py inject-udp --packets "01,02,03" --repeat 5 --interval-ms 100
+python3 ctl.py inject-tcp --sid 1 --to server --packets "50494e47,504f4e47" --repeat 3 --interval-ms 50
+python3 ctl.py inject-tcp --sid 1 --data-hex a1b2 --packets "c3d4,e5f6" --repeat 3
+python3 ctl.py inject-udp --packets "01,02,03" --repeat 5 --interval-ms 100
 
 # 按请求自动回构造应答（模拟服务器行为）：客户端请求含 'auth' 就回死码
-python3 capture_tool/ctl.py set-rule --rule '{"id":"mock-auth","match":{"direction":"c2s","hex_contains":"61757468"},"action":{"type":"respond","response_hex":"00ff","drop_original":true}}'
+python3 ctl.py set-rule --rule '{"id":"mock-auth","match":{"direction":"c2s","hex_contains":"61757468"},"action":{"type":"respond","response_hex":"00ff","drop_original":true}}'
 
 # 任意命令
-python3 capture_tool/ctl.py raw --json '{"cmd":"status"}'
+python3 ctl.py raw --json '{"cmd":"status"}'
 ```
 
 > “重放”当前做法：从 `records` 取出某条记录的 `data_hex`，用 `inject_tcp` /
@@ -274,7 +287,7 @@ python3 capture_tool/ctl.py raw --json '{"cmd":"status"}'
 
 ## UDP 与 Proxifier / ProxyBridge（谁支持、谁不支持）
 
-本核心**支持 UDP**：走的是 SOCKS5 `UDP ASSOCIATE`（`--udp-start-port`，自测见 `test_udp.py`）。
+本核心**支持 UDP**：走的是 SOCKS5 `UDP ASSOCIATE`（`--udp-start-port`，自测见 `test/test_udp.py`）。
 但“某个进程的 UDP 能不能被送进来”取决于**客户端工具**，卡点基本都在这一层：
 
 | 客户端 | UDP | 说明 |
@@ -290,11 +303,11 @@ python3 capture_tool/ctl.py raw --json '{"cmd":"status"}'
 ProxyBridge 侧自查顺序：
 
 1. `Connections` 标签看 `calc_gui.exe` 那条 UDP 是 `PROXY` 还是 `DIRECT`；`DIRECT` 就回上面 ①②③ 查规则。
-2. 本核心侧看有没有关联建立：`python3 capture_tool/ctl.py records --which tcp --hex-contains 05030001`
+2. 本核心侧看有没有关联建立：`python3 ctl.py records --which tcp --hex-contains 05030001`
    （`command=3` + `kind=request` + `data_hex` 以 `05030001` 开头 = UDP ASSOCIATE 成功；
    注意**它记在 TCP 日志里**，不在 udp 日志）。
 3. 之后每个数据报都会打 `UDP [C->S]` / `UDP [S->C]` 日志，负载落到 `--udp-log`
-   （查：`python3 capture_tool/ctl.py records --which udp --limit 20`）。
+   （查：`python3 ctl.py records --which udp --limit 20`）。
    一条都没有 → 核心根本没收到 UDP，问题在客户端工具那一层。
 
 UDP ASSOCIATE 的临时端口与 TCP 控制连接**不必是同一个源端口**：客户端用别的端口发也算数（已自测覆盖）。
@@ -315,19 +328,19 @@ UDP ASSOCIATE 的临时端口与 TCP 控制连接**不必是同一个源端口**
 
 ```bash
 # 核心：把 9001 收到的 UDP 转发到真实服务器 127.0.0.1:9000
-UDP_RELAY="9001:127.0.0.1:9000" ./capture_tool/start.sh
-# 或手工：python3 -u capture_tool/server.py --listen 0.0.0.0:1080 --control 127.0.0.1:1090 \
-#   --udp-log capture_tool/log/udp.log --udp-relay 9001:127.0.0.1:9000
+UDP_RELAY="9001:127.0.0.1:9000" ././start.sh
+# 或手工：python3 -u server.py --listen 0.0.0.0:1080 --control 127.0.0.1:1090 \
+#   --udp-log log/udp.log --udp-relay 9001:127.0.0.1:9000
 
 # 然后把 calc 的服务器地址改成 <本机 IP>:9001（原本指向 :9000）
 ```
 
-中继路径下 `mark` / `records` / `analyze.py` / 规则改包 / `inject_udp` 全部照常可用（自测 `test_udp_relay.py` 覆盖），只是记录里的 `command` 是 **4**。
+中继路径下 `mark` / `records` / `analyze.py` / 规则改包 / `inject_udp` 全部照常可用（自测 `test/test_udp_relay.py` 覆盖），只是记录里的 `command` 是 **4**。
 `inject_udp` 会按“这个客户端是中继认识的还是 SOCKS5 关联的”自动选路（中继路径发裸负载，不套 SOCKS5 UDP 头）。
 
 ## 已实现（对照 docs/idea.md）
 
-- ✅ 代理服务器形态、TCP/UDP 双向转发（UDP = SOCKS5 UDP ASSOCIATE，自测 `test_udp.py`；另支持直连 UDP 中继 `--udp-relay`，自测 `test_udp_relay.py`）
+- ✅ 代理服务器形态、TCP/UDP 双向转发（UDP = SOCKS5 UDP ASSOCIATE，自测 `test/test_udp.py`；另支持直连 UDP 中继 `--udp-relay`，自测 `test/test_udp_relay.py`）
 - ✅ 记录原始字节、源/目标、时间、序号、方向
 - ✅ 在线改请求 / 改响应 / 构造响应 / 丢弃（无需重启两端）
 - ✅ 在线注入 / 重发
