@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# capture_tool/start.sh —— 启动 SOCKS5 代理抓包核心
+# start.sh —— 启动 SOCKS5 代理抓包核心
 #
 # 两种模式
 #   默认（后台）  nohup 脱离终端：SSH / 终端断开后核心继续跑，日志写 log/server.log
@@ -8,11 +8,11 @@
 #                 或 tmux/systemd
 #
 # 用法
-#   ./capture_tool/start.sh                          # 后台启动（默认）
-#   ./capture_tool/start.sh --foreground             # 前台启动（调试时看实时日志）
-#   ./capture_tool/start.sh --help
-#   LISTEN=127.0.0.1:1080 TCP_LOG=/tmp/t.log ./capture_tool/start.sh
-#   ./capture_tool/start.sh --rules capture_tool/rules.example.json
+#   ./start.sh                          # 后台启动（默认）
+#   ./start.sh --foreground             # 前台启动（调试时看实时日志）
+#   ./start.sh --help
+#   LISTEN=127.0.0.1:1080 TCP_LOG=/tmp/t.log ./start.sh
+#   ./start.sh --rules rules.example.json
 #
 # 可覆盖的环境变量
 #   LISTEN(0.0.0.0:1080) CONTROL(127.0.0.1:1090) UDP_START_PORT(1081)
@@ -20,9 +20,8 @@
 # 其余参数原样追加给 server.py（例如 --rules / --udp-start-port）。
 set -uo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # capture_tool/
-ROOT="$(cd "$HERE/.." && pwd)"                          # 仓库根
-cd "$ROOT"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # 仓库根（脚本与 server.py 同层）
+cd "$HERE"
 
 LISTEN="${LISTEN:-0.0.0.0:1080}"          # 客户端在 Windows 时必须是 0.0.0.0
 CONTROL="${CONTROL:-127.0.0.1:1090}"
@@ -42,7 +41,7 @@ die() { echo "错误: $*" >&2; exit 1; }
 
 usage() {
     cat <<'EOF'
-用法: ./capture_tool/start.sh [--foreground|-f] [--background|-b] [--help|-h] [server.py 参数...]
+用法: ./start.sh [--foreground|-f] [--background|-b] [--help|-h] [server.py 参数...]
 
   (默认)         后台启动：nohup 脱离终端，SSH/终端断开后继续运行
   -f, --foreground  前台启动：日志同时打到终端和 log/server.log，Ctrl-C 停止
@@ -75,7 +74,7 @@ mkdir -p "$LOG_DIR" "$(dirname "$PID_FILE")" || die "无法创建 $LOG_DIR 或 $
 if [ -f "$PID_FILE" ]; then
     OLD_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
     if [ -n "${OLD_PID:-}" ] && kill -0 "$OLD_PID" 2>/dev/null; then
-        echo "核心已在运行 (pid $OLD_PID)，未重复启动。要重启先执行 ./capture_tool/stop.sh"
+        echo "核心已在运行 (pid $OLD_PID)，未重复启动。要重启先执行 ./stop.sh"
         exit 0
     fi
     echo "发现过期 pid 文件，忽略: $PID_FILE"
@@ -103,7 +102,7 @@ if ctl_ping; then
 fi
 
 # ---------- 组装命令 ----------
-CMD=(python3 -u capture_tool/server.py
+CMD=(python3 -u "$HERE/server.py"
      --listen "$LISTEN"
      --control "$CONTROL"
      --tcp-log "$TCP_LOG"
@@ -171,7 +170,7 @@ if [ "$READY" != "1" ]; then
         echo "--- $SERVER_LOG 末尾 ---" >&2
         tail -n 20 "$SERVER_LOG" >&2
     fi
-    die "核心已起但控制通道 $CONTROL 无应答；pid=$PYPID（可用 ./capture_tool/stop.sh 收尾）"
+    die "核心已起但控制通道 $CONTROL 无应答；pid=$PYPID（可用 ./stop.sh 收尾）"
 fi
 
 # ---------- 摘要 ----------
@@ -203,12 +202,12 @@ echo "  · Proxifier 不支持 UDP；calc 走 UDP，请用 ProxyBridge 且规则
 echo "  · ProxyBridge 默认『本机流量直连』，目标为 127.0.0.1 时要开 Localhost via Proxy"
 echo
 echo "常用控制命令:"
-echo "  python3 capture_tool/ctl.py status"
-echo "  python3 capture_tool/ctl.py mark --name exp1 --note \"这次想干什么\""
-echo "  python3 capture_tool/ctl.py records --since-mark exp1 --limit 0"
+echo "  python3 ctl.py status"
+echo "  python3 ctl.py mark --name exp1 --note \"这次想干什么\""
+echo "  python3 ctl.py records --since-mark exp1 --limit 0"
 echo "  tail -f $SERVER_LOG"
 echo
-echo "停止: ./capture_tool/stop.sh"
+echo "停止: ./stop.sh"
 
 # ---------- 前台模式：守在这里，直到被打断或核心自己退出 ----------
 if [ "$FOREGROUND" = "1" ]; then
